@@ -5,6 +5,11 @@ part of 'music_player_service.dart';
 /// after AVPlayer fails on it. A song that still fails names its format and
 /// gives way to the next one, for up to [_skipLimit] songs in a row and one
 /// pass over the queue.
+///
+/// On Android only AAC gets a copy, and only after MediaPlayer fails on a
+/// local file: raw AAC streams (`.aac`) are refused on some devices with
+/// MEDIA_ERROR_UNKNOWN. Anything else, or a song FFmpeg cannot copy either,
+/// reports MediaPlayer's own failure as before.
 class _MusicFormats {
   _MusicFormats(this.handler)
     : _copies = AvPlayerCopies(
@@ -32,6 +37,20 @@ class _MusicFormats {
       !handler._cast.active &&
       !playbackExclusiveOutput.value;
 
+  /// Android's MediaPlayer plays the main and prepared decks: not a cast
+  /// device.
+  bool get _androidPlayer =>
+      handler._dependencies.isAndroid &&
+      playbackEngine == PlaybackEngine.audioplayers &&
+      !handler._cast.active;
+
+  /// The Android format of [media], resolved to the local file [path]: the
+  /// Library's format and source name it, else the file's own name, which
+  /// is all a SAF song's temporary copy has.
+  static AvPlayerFormat? _androidFormat(PlayableMedia media, String path) =>
+      androidPlayerFormat(name: media.source, codec: media.format) ??
+      androidPlayerFormat(name: path);
+
   static AvPlayerFormat? _format(PlayableMedia media) =>
       avPlayerFormat(name: media.source, codec: media.format) ??
       (MusicPlayerHandler._requiresDsd(media)
@@ -45,7 +64,15 @@ class _MusicFormats {
   /// or of a song it failed to open before, else its resolved source.
   Future<String?> resolve(PlayableMedia media) async {
     final path = await handler._resolveSource(media);
-    if (path == null || !_avPlayer) return path;
+    if (path == null) return path;
+    if (!_avPlayer) {
+      // MediaPlayer already failed on this AAC song: play its copy at once
+      // instead of failing again first.
+      if (_androidPlayer && _copies.has(media.source)) {
+        return await _copy(media, path, _androidFormat(media, path)) ?? path;
+      }
+      return path;
+    }
     final format = _format(media);
     if (!(format?.never ?? false) && !_copies.has(media.source)) return path;
     return await _copy(media, path, format) ?? path;
@@ -53,13 +80,43 @@ class _MusicFormats {
 
   /// A FLAC copy to try after AVPlayer could not open [path] for [media]:
   /// a local file, or a stream of a format some system versions open.
-  /// Null when there is none to try.
-  Future<String?> afterFailure(PlayableMedia media, String path) async {
-    if (!_avPlayer || owns(path)) return null;
+  /// Null when there is none to try. [error] is what the player threw.
+  Future<String?> afterFailure(
+    PlayableMedia media,
+    String path, {
+    Object? error,
+  }) async {
+    if (!_avPlayer) {
+      return _androidPlayer ? _afterAndroidFailure(media, path, error) : null;
+    }
+    if (owns(path)) return null;
     final format = _format(media);
     // A format AVPlayer never opens already had its copy attempt.
     if (format != null && format.never) return null;
     if (_isUrl(path) ? format == null : !await fileExists(path)) return null;
+    return _copy(media, path, format);
+  }
+
+  /// A FLAC copy to try after Android's MediaPlayer could not open the AAC
+  /// file [path] of [media]; null when there is none to try. Local files
+  /// only: FFmpeg would read a stream to its end before anything played, and
+  /// a SAF song's `/proc` descriptor cannot be reopened. That song falls back
+  /// to a temporary local copy, which comes here next. A refused USB output
+  /// is not a format failure, and a copy of it would not change that.
+  Future<String?> _afterAndroidFailure(
+    PlayableMedia media,
+    String path,
+    Object? error,
+  ) async {
+    if (error is UsbOutputUnavailable ||
+        owns(path) ||
+        _isUrl(path) ||
+        path.startsWith('content://') ||
+        path.startsWith('/proc/self/fd/')) {
+      return null;
+    }
+    final format = _androidFormat(media, path);
+    if (format == null || !await fileExists(path)) return null;
     return _copy(media, path, format);
   }
 

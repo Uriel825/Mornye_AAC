@@ -54,6 +54,60 @@ void main() {
     }
   });
 
+  test('Android only retries AAC after MediaPlayer fails', () {
+    for (final (name, codec) in [
+      ('/music/a.aac', null),
+      ('/music/A.AAC', null),
+      ('/music/a.m4a', 'aac'),
+      ('/music/a.m4a', 'AAC'),
+      ('/music/a.m4a', 'mp4a'),
+      ('/music/a.flac', 'aac'),
+      ('content://example.documents/document/primary%3AMusic%2Fa.aac', null),
+    ]) {
+      final format = androidPlayerFormat(name: name, codec: codec);
+      expect(format?.label, 'AAC', reason: '$name $codec');
+      expect(format?.never, isFalse, reason: '$name $codec');
+      expect(format?.lossy, isTrue, reason: '$name $codec');
+    }
+    for (final (name, codec) in [
+      ('/music/a.flac', 'flac'),
+      ('/music/a.m4a', 'alac'),
+      ('/music/a.m4a', null),
+      ('/music/a.mp3', null),
+      ('/music/a.opus', null),
+      ('/music/a.ape', null),
+      ('dir.aac/song', null),
+      ('noext', null),
+    ]) {
+      expect(
+        androidPlayerFormat(name: name, codec: codec),
+        isNull,
+        reason: '$name $codec',
+      );
+    }
+    // AVPlayer opens AAC, so its own table must not know the format.
+    expect(avPlayerFormat(name: 'a.aac', codec: 'aac'), isNull);
+  });
+
+  test('an AAC copy is 16-bit FLAC from the first audio stream', () {
+    final arguments = avPlayerCopyArguments(
+      '/in/a.aac',
+      '/out/a.flac',
+      format: androidAacFormat,
+    );
+    expect(arguments, containsAllInOrder(['-i', '/in/a.aac']));
+    expect(arguments, containsAllInOrder(['-map', '0:a:0']));
+    expect(arguments, containsAllInOrder(['-c:a', 'flac']));
+    expect(arguments, containsAllInOrder(['-sample_fmt', 's16']));
+    expect(arguments, isNot(contains('-ar')));
+    expect(arguments.sublist(arguments.length - 4), [
+      '-f',
+      'flac',
+      '/out/a.flac',
+      '-y',
+    ]);
+  });
+
   test('copies keep sample rates AVPlayer plays and bring DSD down', () {
     expect(avPlayerCopyRate(null, dsd: false), isNull);
     expect(avPlayerCopyRate(192000, dsd: false), isNull);

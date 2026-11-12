@@ -774,6 +774,109 @@ void main() {
     },
   );
 
+  group('Android AAC', () {
+    List<Object?> opened() => native.calls
+        .where((call) => call.$2 == 'setSourceUrl')
+        .map((call) => call.$3['url'])
+        .toList();
+
+    test('plays from a FLAC copy when MediaPlayer refuses it', () async {
+      final aac = await song('one.aac');
+      native.sourceFailures.add(aac.source);
+      final p = await player(android: true, avPlayer: false);
+      await p.handler.setQueueAndPlay([aac, await song('two.flac')]);
+
+      expect(p.conversions, hasLength(1));
+      expect(p.conversions.single, containsAllInOrder(['-i', aac.source]));
+      final copy = _output(p.conversions.single);
+      expect(opened(), [aac.source, copy]);
+      expect(native.resumedSources, [copy]);
+      expect(p.handler.playbackState.value.playing, isTrue);
+      expect(p.handler.playbackState.value.errorMessage, isNull);
+      expect(p.handler.mediaItem.value?.id, 'one.aac');
+      expect(p.notices, isEmpty);
+    });
+
+    test('is not converted when MediaPlayer opens it', () async {
+      final aac = await song('one.aac');
+      final p = await player(android: true, avPlayer: false);
+      await p.handler.setQueueAndPlay([aac]);
+
+      expect(p.conversions, isEmpty);
+      expect(native.resumedSources, [aac.source]);
+      expect(p.handler.playbackState.value.errorMessage, isNull);
+    });
+
+    test('uses the copy at once when the song plays again', () async {
+      final aac = await song('one.aac');
+      final flac = await song('two.flac');
+      native.sourceFailures.add(aac.source);
+      final p = await player(android: true, avPlayer: false);
+      await p.handler.setQueueAndPlay([aac, flac]);
+      final copy = _output(p.conversions.single);
+      await p.handler.skipToQueueItem(1);
+      await p.handler.skipToQueueItem(0);
+
+      // MediaPlayer fails on the original only once.
+      expect(p.conversions, hasLength(1));
+      expect(opened(), [aac.source, copy, flac.source, copy]);
+      expect(native.resumedSources.last, copy);
+      expect(p.handler.playbackState.value.errorMessage, isNull);
+    });
+
+    test('keeps the native error when FFmpeg cannot copy it', () async {
+      final aac = await song('one.aac');
+      native.sourceFailures.add(aac.source);
+      final p = await player(
+        android: true,
+        avPlayer: false,
+        convert: (_) async => false,
+      );
+      await p.handler.setQueueAndPlay([aac, await song('two.flac')]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // Android neither names the format nor skips on: only the error shows.
+      expect(p.conversions, hasLength(1));
+      expect(p.notices, isEmpty);
+      expect(p.handler.mediaItem.value?.id, 'one.aac');
+      expect(
+        p.handler.playbackState.value.processingState,
+        AudioProcessingState.error,
+      );
+      expect(native.resumedSources, isEmpty);
+    });
+
+    test('is not copied when the file is gone', () async {
+      final gone = await song('gone.aac');
+      await File(gone.source).delete();
+      native.sourceFailures.add(gone.source);
+      final p = await player(android: true, avPlayer: false);
+      await p.handler.setQueueAndPlay([gone, await song('two.flac')]);
+      await waitUntil(() => native.resumedSources.isNotEmpty);
+
+      expect(p.conversions, isEmpty);
+      expect(p.handler.mediaItem.value?.id, 'two.flac');
+      expect(p.handler.queue.value.map((item) => item.id), ['two.flac']);
+      expect(p.handler.playbackState.value.errorMessage, isNull);
+    });
+
+    test('other formats keep the native error without a copy', () async {
+      final flac = await song('one.flac', format: 'flac');
+      native.sourceFailures.add(flac.source);
+      final p = await player(android: true, avPlayer: false);
+      await p.handler.setQueueAndPlay([flac, await song('two.flac')]);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(p.conversions, isEmpty);
+      expect(p.notices, isEmpty);
+      expect(p.handler.mediaItem.value?.id, 'one.flac');
+      expect(
+        p.handler.playbackState.value.processingState,
+        AudioProcessingState.error,
+      );
+    });
+  });
+
   test('gapless playback prepares the next song from its copy', () async {
     final flac = await song('one.flac');
     final ape = await song('two.ape');

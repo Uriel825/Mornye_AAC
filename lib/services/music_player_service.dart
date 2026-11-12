@@ -1678,7 +1678,7 @@ class MusicPlayerHandler extends BaseAudioHandler
       media.source.toLowerCase().endsWith('.dff');
 
   /// Starts [path] and returns what plays: [path], or a FLAC copy when
-  /// AVPlayer cannot open it.
+  /// AVPlayer, or Android's MediaPlayer for an AAC song, cannot open it.
   Future<String> _startResolvedSource(
     String path,
     int generation,
@@ -1708,9 +1708,9 @@ class MusicPlayerHandler extends BaseAudioHandler
           requiresDsd: _requiresDsd(media),
         );
       }
-    } catch (_) {
+    } catch (error) {
       if (!_isCurrentPlayRequest(generation, media)) rethrow;
-      final copy = await _formats.afterFailure(media, path);
+      final copy = await _formats.afterFailure(media, path, error: error);
       if (copy == null || !_isCurrentPlayRequest(generation, media)) rethrow;
       return _startResolvedSource(
         copy,

@@ -58,6 +58,24 @@ AvPlayerFormat? avPlayerFormat({String? name, String? codec}) {
   return _formats[fileExtension(name)];
 }
 
+/// AAC, the format Android's MediaPlayer is known to refuse on some devices
+/// and Android versions: a raw AAC stream (`.aac`: ADTS, LATM or ADIF with no
+/// MP4 container) can fail to open with MEDIA_ERROR_UNKNOWN. FFmpeg decodes
+/// all of them, so after MediaPlayer fails the song plays from a FLAC copy.
+const androidAacFormat = (label: 'AAC', never: false, lossy: true);
+
+/// The format of a song Android's MediaPlayer may not open, from its [codec]
+/// (the Library's format) and the extension of its file [name]; null when
+/// MediaPlayer's own failure is the answer. Only [androidAacFormat] today.
+/// Separate from [avPlayerFormat]: AVPlayer opens AAC.
+AvPlayerFormat? androidPlayerFormat({String? name, String? codec}) {
+  final key = codec?.trim().toLowerCase();
+  if (key == 'aac' || key == 'mp4a' || fileExtension(name) == 'aac') {
+    return androidAacFormat;
+  }
+  return null;
+}
+
 /// The lowercase extension of the last path segment of [name], or ''.
 String fileExtension(String? name) {
   if (name == null) return '';
@@ -133,9 +151,9 @@ class _CopyJob {
   final bool dsd;
 }
 
-/// FLAC copies of songs AVPlayer cannot open, keyed by song source and
-/// bounded like SAF playback copies. Pinned copies (the playing song, a
-/// prepared next one) are deleted once released.
+/// FLAC copies of songs AVPlayer, or Android's MediaPlayer for AAC, cannot
+/// open, keyed by song source and bounded like SAF playback copies. Pinned
+/// copies (the playing song, a prepared next one) are deleted once released.
 class AvPlayerCopies {
   AvPlayerCopies({
     required Future<bool> Function(List<String> arguments) run,
