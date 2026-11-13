@@ -72,6 +72,7 @@ class PlaybackDependencies {
     this.readMetadata = PlatformBridge.readFileMetadata,
     this.readNetworkMetadata = _readNetworkMetadata,
     this.resolveNetworkSource = _resolveNetworkSource,
+    this.resolveNetworkTranscode = _resolveNetworkTranscode,
     this.offlineCopy = _offlineCopy,
     this.networkCache = _networkCache,
     this.networkSourceReachable = _networkSourceReachable,
@@ -125,6 +126,9 @@ class PlaybackDependencies {
   readMetadata;
   final Future<Map<String, dynamic>> Function(String) readNetworkMetadata;
   final Future<String> Function(String) resolveNetworkSource;
+  /// The URL of a network song transcoded for a player that cannot decode
+  /// its original; see [_MusicFormats.streamRetry].
+  final Future<String> Function(String) resolveNetworkTranscode;
   final Future<String?> Function(String) offlineCopy;
 
   /// The local copies of network songs around the one playing; null plays
@@ -236,6 +240,8 @@ class PlaybackDependencies {
       NetworkMetadataService.instance.read(source);
   static Future<String> _resolveNetworkSource(String source) =>
       NetworkStorageService.instance.resolve(source);
+  static Future<String> _resolveNetworkTranscode(String source) =>
+      NetworkStorageService.instance.resolve(source, format: 'mp3');
   static Future<String?> _offlineCopy(String source) async {
     final row = await HistoryDatabase.instance.findOfflineCopy(source);
     final path = row?['filePath'] as String?;

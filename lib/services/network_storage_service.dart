@@ -381,7 +381,7 @@ class NetworkStorageService {
   List<NetworkConnection>? _connections;
   Future<HttpServer>? _server;
   Future<void> _mutation = Future.value();
-  final _routes = <String, ({String id, String path})>{};
+  final _routes = <String, ({String id, String path, String? format})>{};
   final _readClients =
       <
         ({
@@ -660,7 +660,9 @@ class NetworkStorageService {
     }
   }
 
-  Future<String> resolve(String source) async {
+  /// A local URL that streams [source]. [format] asks a Subsonic server for
+  /// a transcode (`mp3`) instead of the original file; other sources ignore it.
+  Future<String> resolve(String source, {String? format}) async {
     final (:host, :path) = _sourceParts(source);
     if (virtualFor(host) case final virtual?) {
       return virtual.resolve(host, path);
@@ -679,7 +681,9 @@ class NetworkStorageService {
     }
     final name = _networkFileName(c, path);
     final dot = name.lastIndexOf('.');
-    final suffix = dot < 0 ? '' : name.substring(dot + 1).toLowerCase();
+    // A transcode answers in its own format, whatever the original was.
+    final suffix =
+        format ?? (dot < 0 ? '' : name.substring(dot + 1).toLowerCase());
     // AVPlayer needs a file-type hint even when a NAS serves generic bytes.
     // Keep names and credentials private behind the unguessable route.
     final token = RegExp(r'^[a-z0-9]{1,10}$').hasMatch(suffix)
@@ -688,7 +692,7 @@ class NetworkStorageService {
     while (_routes.length >= 256) {
       _routes.remove(_routes.keys.first);
     }
-    _routes[token] = (id: host, path: path);
+    _routes[token] = (id: host, path: path, format: format);
     return 'http://127.0.0.1:${server.port}/$token';
   }
 
@@ -1340,9 +1344,10 @@ class NetworkStorageService {
     String path, {
     String method = 'GET',
     String? range,
+    String? format,
   }) async {
     final target = c.protocol == NetworkProtocol.subsonic
-        ? _subsonicMediaTarget(c, path)
+        ? _subsonicMediaTarget(c, path, format: format)
         : networkTarget(c, path);
     if (c.protocol == NetworkProtocol.smb) {
       final smb = await _smb(c, target, shared: true);
@@ -1453,6 +1458,7 @@ class NetworkStorageService {
         route.path,
         method: request.method,
         range: range,
+        format: route.format,
       );
       request.response.statusCode = read.status >= 300 && read.status < 400
           ? HttpStatus.badGateway

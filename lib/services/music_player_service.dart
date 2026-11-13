@@ -1710,7 +1710,9 @@ class MusicPlayerHandler extends BaseAudioHandler
       }
     } catch (error) {
       if (!_isCurrentPlayRequest(generation, media)) rethrow;
-      final copy = await _formats.afterFailure(media, path, error: error);
+      final copy =
+          await _formats.afterFailure(media, path, error: error) ??
+          await _formats.streamRetry(media, path, error: error);
       if (copy == null || !_isCurrentPlayRequest(generation, media)) rethrow;
       return _startResolvedSource(
         copy,

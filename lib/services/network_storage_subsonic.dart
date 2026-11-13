@@ -89,7 +89,14 @@ Uri _subsonicTarget(
   );
 }
 
-Uri _subsonicMediaTarget(NetworkConnection connection, String path) {
+/// The Subsonic URL of [path]. A song streams its original file unless
+/// [format] asks for a transcode: `mp3` at 320 kbps, which Android plays
+/// when it cannot decode a lossless or AAC original.
+Uri _subsonicMediaTarget(
+  NetworkConnection connection,
+  String path, {
+  String? format,
+}) {
   final segments = networkPath(path).split('/');
   if (segments.length != 3 || segments.first != 'subsonic') {
     throw const FormatException('Invalid Subsonic media path');
@@ -99,7 +106,8 @@ Uri _subsonicMediaTarget(NetworkConnection connection, String path) {
   return switch (segments[1]) {
     'song' => _subsonicTarget(connection, 'stream', {
       'id': id,
-      'format': 'raw',
+      'format': format ?? 'raw',
+      if (format == 'mp3') 'maxBitRate': '320',
     }),
     'cover' => _subsonicTarget(connection, 'getCoverArt', {'id': id}),
     _ => throw const FormatException('Invalid Subsonic media path'),

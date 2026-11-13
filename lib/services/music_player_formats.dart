@@ -9,7 +9,8 @@ part of 'music_player_service.dart';
 /// On Android only AAC gets a copy, and only after MediaPlayer fails on a
 /// local file: raw AAC streams (`.aac`) are refused on some devices with
 /// MEDIA_ERROR_UNKNOWN. Anything else, or a song FFmpeg cannot copy either,
-/// reports MediaPlayer's own failure as before.
+/// reports MediaPlayer's own failure as before. A streamed song MediaPlayer
+/// refuses is retried once as an MP3 transcode from the server ([streamRetry]).
 class _MusicFormats {
   _MusicFormats(this.handler)
     : _copies = AvPlayerCopies(
@@ -23,6 +24,10 @@ class _MusicFormats {
       );
 
   static const _skipLimit = 10;
+
+  /// The network song whose transcode retry was last made, so one that fails
+  /// again is not retried forever.
+  String? _transcodedSource;
 
   final MusicPlayerHandler handler;
   final AvPlayerCopies _copies;
@@ -96,6 +101,29 @@ class _MusicFormats {
     if (_isUrl(path) ? format == null : !await fileExists(path)) return null;
     return _copy(media, path, format);
   }
+
+  /// The URL to retry a streamed song from, transcoded to MP3, when Android's
+  /// MediaPlayer cannot play the original (ALAC or AAC on a Navidrome server):
+  /// [path] is the loopback URL the song streams from. Once per song, so a
+  /// transcode that fails too gives its error. Null when there is no retry.
+  Future<String?> streamRetry(
+    PlayableMedia media,
+    String path, {
+    Object? error,
+  }) async {
+    if (!_androidPlayer || !_isLoopback(path) || !media.isNetwork) return null;
+    if (error is UsbOutputUnavailable || _transcodedSource == media.source) {
+      return null;
+    }
+    _transcodedSource = media.source;
+    try {
+      return await handler._dependencies.resolveNetworkTranscode(media.source);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _isLoopback(String path) => path.startsWith('http://127.0.0.1:');
 
   /// A FLAC copy to try after Android's MediaPlayer could not open the AAC
   /// file [path] of [media]; null when there is none to try. Local files

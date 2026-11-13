@@ -48,6 +48,17 @@ class _MusicFailures {
     handler._sourceReady = false;
     _checkingGeneration = generation;
     try {
+      // MediaPlayer refused a streamed song it had opened: play it again as
+      // an MP3 transcode from the same place, once, before any skip.
+      final transcode = await handler._formats.streamRetry(
+        media,
+        resolved ?? '',
+        error: error,
+      );
+      if (transcode != null &&
+          await _restartAt(media, transcode, generation)) {
+        return;
+      }
       if (await skipMissing(
         media,
         resolved,
@@ -61,6 +72,34 @@ class _MusicFailures {
       }
     } finally {
       if (_checkingGeneration == generation) _checkingGeneration = null;
+    }
+  }
+
+  /// Plays [media] from [url], a transcode of the same song, from the position
+  /// it had. False when that fails too, so the caller reports the error.
+  Future<bool> _restartAt(
+    PlayableMedia media,
+    String url,
+    int generation,
+  ) async {
+    try {
+      final position = await handler._player.getCurrentPosition();
+      await handler._player.stop();
+      if (!handler._isCurrentPlayRequest(generation, media)) return true;
+      await handler._startResolvedSource(
+        url,
+        generation,
+        media,
+        position != null && position > Duration.zero ? position : null,
+        startPaused: handler._userPaused || handler._interruptionActive,
+      );
+      if (!handler._isCurrentPlayRequest(generation, media)) return true;
+      handler._sourceReady = true;
+      started(media, url);
+      return true;
+    } catch (error) {
+      _log.w('Transcoded retry failed: $error');
+      return false;
     }
   }
 
